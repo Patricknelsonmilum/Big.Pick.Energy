@@ -1,0 +1,909 @@
+---
+title: "Big Pick Energy Baseball"
+author: "Patrick Milum"
+date: "2023-05-10"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Not meant to knit! Don't do it. It will take you forever. Just an organized way to keep things updated.
+
+### [**Daily Runs**]{.underline}
+
+#### Load packages, get colors/logos
+
+For adding colors/logos to a plot: `left_join` colors2 data frame with
+whatever data you want to visualize. See final step here.
+
+```{r include = FALSE}
+library(tidyverse)
+library(ggimage)
+library(teamcolors)
+library(ggpubr)
+library(baseballr)
+library(ggrepel)
+library(lubridate)
+library(ggplot2)
+library(rvest)
+library(skimr)
+library(writexl)
+
+colors <- teamcolors %>% filter(league == "mlb") %>%
+  mutate(name = case_when(
+    name == "Cleveland Indians" ~ "Cleveland Guardians", 
+    TRUE ~ name)) %>%
+  mutate(mascot = case_when(
+    mascot == "Indians" ~ "Guardians", 
+    TRUE ~ mascot)) %>%
+  mutate(sportslogos_name = case_when(
+    sportslogos_name == 'Cleveland Indians' ~ 'Cleveland Guardians', 
+    TRUE ~ sportslogos_name))
+
+colors2 <- colors %>%
+  mutate(team.abbr = case_when(mascot == 'Diamondbacks' ~ 'ARI', 
+                               mascot == 'Braves' ~ 'ATL', 
+                               mascot == 'Orioles' ~ 'BAL', 
+                               mascot == 'Red Sox' ~ 'BOS', 
+                               mascot == 'Cubs' ~ 'CHC', 
+                               mascot ==  'White Sox' ~ 'CHW', 
+                               mascot ==  'Reds' ~ 'CIN', 
+                               mascot == 'Indians' ~ 'CLE', 
+                               mascot == 'Rockies' ~ 'COL', 
+                               mascot == 'Tigers' ~ 'DET', 
+                               mascot == 'Astros' ~ 'HOU', 
+                               mascot == 'Royals' ~ 'KCR', 
+                               mascot == 'Angels' ~ 'LAA', 
+                               mascot == 'Dodgers' ~ 'LAD', 
+                               mascot == 'Marlins' ~ 'MIA', 
+                               mascot == 'Brewers' ~ 'MIL', 
+                               mascot == 'Twins' ~ 'MIN', 
+                               mascot == 'Mets' ~ 'NYM', 
+                               mascot == 'Yankees' ~ 'NYY', 
+                               mascot == 'Athletics' ~ 'OAK', 
+                               mascot == 'Phillies' ~ 'PHI', 
+                               mascot == 'Pirates' ~ 'PIT', 
+                               mascot == 'Padres' ~ 'SDP', 
+                               mascot == 'Giants' ~ 'SFG', 
+                               mascot == 'Mariners' ~ 'SEA', 
+                               mascot == 'Cardinals' ~ 'STL', 
+                               mascot == 'Rays' ~ 'TBR', 
+                               mascot == 'Rangers' ~ 'TEX', 
+                               mascot == 'Blue Jays' ~ 'TOR', 
+                               mascot == 'Nationals' ~ 'WSN', 
+                               mascot == 'Guardians' ~ 'CLE'))
+
+team.batting.plot <- left_join(team.batting, colors2, 
+                               join_by(Team == team.abbr))
+team.pitching.plot <- left_join(team.pitching, colors2, 
+                                join_by(Team == team.abbr))
+```
+
+#### Scrape pitch by pitch data from Statcast
+
+This should be done in (usually) 5-6 day pulls. Once the scrape has
+reached its limit, you'll need to end the date and create a new call.
+You do NOT want to call the previous scrapes once you have them in your
+Global Environment. They take a while.
+
+```{r}
+#scrape1.pbp <- statcast_search("2023-03-30", "2023-04-05", player_type = "pitcher") 
+#scrape2.pbp <- statcast_search("2023-04-06", "2023-04-10", player_type = "pitcher")
+#scrape3.pbp <- statcast_search("2023-04-11", "2023-04-17", player_type = "pitcher") 
+#scrape4.pbp <- statcast_search("2023-04-18", "2023-04-23", player_type = "pitcher")
+#scrape5.pbp <- statcast_search("2023-04-24", "2023-04-30", player_type = "pitcher")
+#scrape6.pbp <- statcast_search("2023-05-01", "2023-05-06", player_type = "pitcher")
+#scrape7.pbp <- statcast_search("2023-05-07", "2023-05-13", player_type = "pitcher")
+scrape8.pbp <- statcast_search("2023-05-14", today(), player_type = "pitcher")
+
+
+```
+
+From here you'll need to bind the scrapes together into one data frame.
+Don't forget to add the new scrapes here! You'll also create a data
+frame from the Chadwick Database which has the names and player IDs for
+all MLB players.
+
+```{r include = FALSE}
+season <- rbind(scrape1.pbp, scrape2.pbp, scrape3.pbp, scrape4.pbp, scrape5.pbp, scrape6.pbp, 
+                scrape7.pbp, scrape8.pbp) 
+#chad <- chadwick_player_lu()%>%
+#  select(key_mlbam, name_last, name_first) %>%
+ # filter(!is.na(key_mlbam)) 
+```
+
+Finally, you can left_join your 'season' data frame with 'chad' and
+sort, select, arrange, and mutate your variables! This is the cool part.
+
+```{r}
+season.pbp <- left_join(season, chad, join_by("batter" == "key_mlbam")) %>%
+  rename(., "batter_id" = "batter") %>%
+  rename(., "pitcher_id" = "pitcher") %>%
+  rename(., "pitcher" = "player_name") %>%
+  unite(., batter, c(name_last, name_first)) %>%
+  select(game_date, pitcher, p_throws, batter, stand, pitch_type, pitch_name, pitch_number, balls, strikes, outs_when_up, at_bat_number, 
+         release_speed, release_spin_rate, release_extension, release_pos_x, release_pos_z, description, events, des, home_team, away_team, inning, 
+         inning_topbot, launch_speed, launch_angle, estimated_ba_using_speedangle, home_score, away_score, post_home_score, post_away_score, 
+         bat_score, fld_score, post_bat_score, post_fld_score, game_pk, at_bat_number, pitcher_id, batter_id, everything()) %>%
+  arrange(desc(game_date), game_pk) %>%
+  mutate(batter = str_replace_all(batter, "_", ", ")) %>%
+  mutate(pitcher.home = ifelse(inning_topbot == "Top", "Home", "Away")) %>%
+  mutate(pitcher.team = ifelse(pitcher.home == "Home", paste(home_team), paste(away_team))) %>%
+  mutate(batter.home = ifelse(inning_topbot == "Bot", "Home", "Away")) %>%
+  mutate(batter.team = ifelse(batter.home == "Home", paste(home_team), paste(away_team))) %>%
+  mutate(batter.team = case_when(batter.team == 'AZ' ~ 'ARI', 
+                          batter.team == 'KC' ~ 'KCR', 
+                          batter.team == 'SF' ~ 'SFG', 
+                          batter.team == 'WSH' ~ 'WSN', 
+                          batter.team == 'SD' ~ 'SDP', 
+                          batter.team == 'TB' ~ 'TBR', 
+                          batter.team == 'CWS' ~ 'CHW', 
+                          TRUE ~ batter.team)) %>%
+  mutate(pitcher.team = case_when(pitcher.team == 'AZ' ~ 'ARI', 
+                          pitcher.team == 'KC' ~ 'KCR', 
+                          pitcher.team == 'SF' ~ 'SFG', 
+                          pitcher.team == 'WSH' ~ 'WSN', 
+                          pitcher.team == 'SD' ~ 'SDP', 
+                          pitcher.team == 'TB' ~ 'TBR', 
+                          pitcher.team == 'CWS' ~ 'CHW', 
+                          TRUE ~ pitcher.team)) %>%
+  mutate(home_team = case_when(home_team == 'AZ' ~ 'ARI', 
+                          home_team == 'KC' ~ 'KCR', 
+                          home_team == 'SF' ~ 'SFG', 
+                          home_team == 'WSH' ~ 'WSN', 
+                          home_team == 'SD' ~ 'SDP', 
+                          home_team == 'TB' ~ 'TBR', 
+                          home_team == 'CWS' ~ 'CHW', 
+                          TRUE ~ home_team)) %>%
+  mutate(away_team = case_when(away_team == 'AZ' ~ 'ARI', 
+                          away_team == 'KC' ~ 'KCR', 
+                          away_team == 'SF' ~ 'SFG', 
+                          away_team == 'WSH' ~ 'WSN', 
+                          away_team == 'SD' ~ 'SDP', 
+                          away_team == 'TB' ~ 'TBR', 
+                          away_team == 'CWS' ~ 'CHW', 
+                          TRUE ~ away_team)) 
+```
+
+#### Individual player stats (season long)
+
+This comes from Fangraphs, which can be different from Statcast
+sometimes (just a head's up). Pitching has 303 variables, qual = IP.
+Batting has 289 variables, qual = AB.
+
+```{r}
+pitchers <- fg_pitch_leaders(2023, 2023, qual = .1) %>%
+  mutate(Pitches.per.PA = round((Pitches/TBF), 2)) %>%
+  select(playerid,Name, Team, G, GS, W, L, ER, ERA, IP, Relief_IP, LOB_pct, SV, BS, TBF, H, R, RS, RS_9, HR, BB, SO, Balls, Strikes, Pitches, 
+         Pitches.per.PA, Zone_pct, BB_pct, BB_9, K_pct, K_9, H_9, HR_9, AVG, WHIP, BABIP, Pull_pct, Cent_pct, Oppo_pct,
+               GB_pct, FB_pct, LD_pct, WPA, RE24, FBall_pct, FBv, 
+               SL_pct, SLv, CT_pct, CTv, CB_pct, CBv, CH_pct, CHv, Swing_pct, `O-Swing_pct`, `Z-Swing_pct`, 
+               Contact_pct, `O-Contact_pct`, `Z-Contact_pct`, `F-Strike_pct`, SwStr_pct, Hard_pct, Pace, everything())
+
+batters <- fg_batter_leaders(2023, 2023, qual = 1) %>%
+  mutate(Pitches.per.PA = round((Pitches/PA), 2), 
+         R.per.PA = round((R/PA), 2))%>%
+  select(playerid, Name, Team, G, AB, PA, H, `1B`, `2B`, `3B`, HR, R, R.per.PA, Pitches, 
+         Balls, Strikes, Pitches.per.PA, RBI, BB, SO, GDP, SB, CS, AVG, OBP, SLG, OPS, 
+          BABIP, BB_pct, K_pct, GB_pct, FB_pct, wOBA, wRC, WAR, WPA, RE24, FBall_pct, FBv, 
+          SL_pct, SLv, CT_pct, CTv, CB_pct, CBv, CH_pct, CHv, Swing_pct, `O-Swing_pct`, `Z-Swing_pct`, 
+          Contact_pct, `O-Contact_pct`, `Z-Contact_pct`, `F-Strike_pct`, SwStr_pct, Hard_pct, Pace, everything())
+
+```
+
+#### Team stats (season long)
+
+This also comes from Fangraphs. After you mutate and select some key
+variables, you calculate the mean for every stat so you can have a basis
+for comparison. You'll then bind the mean row with the data frame.
+
+```{r include = FALSE}
+team.batting <- fg_team_batter(2023, 2023) %>%
+  mutate(Pitches.per.AB = round((Pitches/AB), 3), 
+         R.per.AB = round((R/AB), 2), 
+         R.per.PA = round((R/PA), 2)) %>%
+  select(Team, AB, PA, H, R, R.per.AB, R.per.PA, HR, RBI, BB, SO, GDP, SB, CS, AVG, OBP, SLG, OPS, 
+         BABIP, Pitches, Pitches.per.AB, BB_pct, K_pct, GB_pct, FB_pct, wOBA, wRC, WAR, WPA, RE24, FBall_pct, FBv, 
+         SL_pct, SLv, CT_pct, CTv, CB_pct, CBv, CH_pct, CHv, Swing_pct, `O-Swing_pct`, `Z-Swing_pct`, 
+         Contact_pct, `O-Contact_pct`, `Z-Contact_pct`, `F-Strike_pct`, SwStr_pct, Hard_pct, Pace, everything())
+bat.mean <- summarize_all(team.batting, mean, 2)
+team.batting <- rbind(team.batting, bat.mean)
+team.batting[31, 1] <- "Mean"
+
+
+team.pitching <- fg_team_pitcher(2023, 2023) %>%
+  mutate(pitches.per.PA = round(Pitches/TBF, 2), 
+         G = W + L, 
+         RA.per.G = round((R/G), 2), 
+         RD = RS - R, 
+         RD.per.G = round(RD/G, 2)) %>%
+  select(Team, G, W, L, ERA, IP, Relief_IP, SV, BS, TBF, H, R, RS, RS_9, RA.per.G, HR, BB, SO, Balls, Strikes, Pitches, pitches.per.PA, BB_pct, BB_9, K_pct, K_9, H_9, HR_9, AVG, WHIP, BABIP, 
+         GB_pct, FB_pct, WPA, RE24, FBall_pct, FBv, 
+         SL_pct, SLv, CT_pct, CTv, CB_pct, CBv, CH_pct, CHv, Swing_pct, `O-Swing_pct`, `Z-Swing_pct`, 
+         Contact_pct, `O-Contact_pct`, `Z-Contact_pct`, `F-Strike_pct`, SwStr_pct, Hard_pct, Pace, everything())
+pitch.mean <- summarize_all(team.pitching, mean, 2)
+team.pitching <- rbind(team.pitching, pitch.mean)
+team.pitching[31,1] <- "Mean"
+```
+
+------------------------------------------------------------------------
+
+### [**Pitching Finds**]{.underline}
+
+Here we are going to dive into the data that we've been collecting for
+the 2023 season. Make sure to identify whether each data frame, metric,
+new variable, etc. are measuring pitching performance or batting
+performance. This should be growing all the time (ideally). Make sure to
+provide context and detail for each code. What does it measure, what
+needs to be considered, are there outliers, etc.? Let's go!
+
+#### Total Pitches by Type (arsenal)
+
+There is probably a much easier way to organize this (in fewer lines of
+code), but this tells the number of pitches each pitcher has thrown over
+the course of a season. Not much to infer from this, just interesting to
+see the different pitch arsenals. Minimum of 20 total pitches thrown
+(this will be raised as the year progresses).
+
+```{r include = FALSE}
+arsenal <- season.pbp %>%
+  group_by(pitcher, pitcher.team) %>%
+  summarize(total.pitches = n(), 
+            `4-Seam Fastball` = sum(pitch_type == 'FF'), 
+            ff.pct = round(`4-Seam Fastball`/total.pitches, 2), 
+            `Curveball` = sum(pitch_type == 'CU'), 
+            cu.pct = round(Curveball/total.pitches, 2), 
+            `Changeup` = sum(pitch_type == 'CH'), 
+            ch.pct = round(Changeup/total.pitches, 2), 
+            `Slider` = sum(pitch_type == 'SL'), 
+            sl.pct = round(Slider/total.pitches, 2), 
+            `Cutter` = sum(pitch_type == 'FC'), 
+            fc.pct = round(Cutter/total.pitches, 2), 
+            `Sinker` = sum(pitch_type == 'SI'), 
+            si.pct = round(Sinker/total.pitches, 2), 
+            `Split-Finger` = sum(pitch_type == 'FS'), 
+            fs.pct = round(`Split-Finger`/total.pitches, 2), 
+            `Knuckle-Curve` = sum(pitch_type == 'KC'), 
+            kc.pct = round(`Knuckle-Curve`/total.pitches, 2), 
+            `Sweeper` = sum(pitch_type == 'ST'), 
+            st.pct = round(Sweeper/total.pitches, 2), 
+            `Slurve` = sum(pitch_type == 'SV'), 
+            sv.pct = round(Slurve/total.pitches, 2), 
+            `Screwball` = sum(pitch_type == 'SC'), 
+            sc.pct = round(Screwball/total.pitches, 2), 
+            `Forkball` = sum(pitch_type == 'FO'), 
+            fo.pct = round(Forkball/total.pitches, 2), 
+            `Other` = sum(pitch_type == 'FA'), 
+            other.pct = round(Other/total.pitches, 2)) %>%
+  filter(total.pitches >= 20) %>%
+  arrange(desc(total.pitches))
+```
+
+#### Details of Pitch Types (pitch.details)
+
+This call is going to give you the average velocity, spin, extension of
+each pitch type. It will also tell you how many were thrown for balls,
+strikes, ball-fours, strike-threes, and homers. One way to improve on
+this would be to add movement profiles for each pitch. This would help
+in the future with visualizing the data. Note: the strike.pct column
+tells if the pitch was a strike OR made contact with (including put in
+play). Minimum of 20 tosses of that particular pitch. Pairs well with
+batter.hits.by.type.
+
+```{r include = FALSE}
+pitch.details <- season.pbp %>%
+  group_by(pitcher, pitch_name, pitcher.team) %>%
+  summarize(count = n(),
+            avg.speed = round(mean(release_speed, na.rm = T), 2), 
+            avg.spin = round(mean(release_spin_rate, na.rm = T), 2), 
+            avg.ext = round(mean(release_extension, na.rm = T), 2), 
+            hits = sum(events == 'single' | events == 'double' | events == 'triple' | events == 'home_run'), 
+            balls = sum(type == "B"), 
+            strikes = sum(type == "S" | type == "X"), 
+            ball.fours = sum(events == 'walk'), 
+            strike.threes = sum(events == 'strikeout'), 
+            homeruns = sum(events == 'home_run'), 
+            hr.freq = round(homeruns/count, 2),
+            hit.pct = round(hits/count, 2)) %>%
+  mutate(strike.pct = round(strikes/count, 2)) %>%
+  filter(count >= 15)
+```
+
+#### First Five Innings, Pitchers (f5.pitcher.logs, f5.pitcher.season) \*work on visualization
+
+Here we have some information about how each starting pitcher does in
+their first five innings of work. This is mainly used for F5 betting
+purposes, although it can help understand who is struggling early and
+who starts well. The first call (`first.five.pitchers`) gives game logs.
+This can help look at outliers and see how a pitcher matched up against
+a particular team. From there, we create the `first.five` data frame,
+which shows us a pitcher's season totals. #ggplot viz needs work#
+
+```{r }
+f5.pitcher.logs <- season.pbp %>%
+  filter(inning <= 5) %>%
+  group_by(pitcher, game_pk, pitcher.team, batter.team) %>%
+  summarize(PA = (max(at_bat_number) - min(at_bat_number) + 1),
+            hits = sum(events %in% c('single', 'double', 'triple', 'home_run')), 
+            walks.hbp.error = sum(events %in% c('walk', 'hit_by_pitch', 'catcher_interf', 'field_error')), 
+            total.batters.reached = hits + walks.hbp.error, 
+            pct.batters.reached = round(total.batters.reached/PA, 2), 
+            runs.allowed = sum(post_bat_score - bat_score), 
+            pct.runners.scored = round(runs.allowed/total.batters.reached, 2))
+
+f5.pitcher.season <- f5.pitcher.logs %>%
+  group_by(pitcher, pitcher.team) %>%
+  summarize(PA = sum(PA), 
+            hits = sum(hits), 
+            walks.hbp.error = sum(walks.hbp.error), 
+            total.batters.reached = sum(total.batters.reached), 
+            pct.batters.reached = round(mean(pct.batters.reached), 2), 
+            runs.allowed = sum(runs.allowed), 
+            pct.runners.scored = round(mean(pct.runners.scored), 2), 
+            runs.per.PA= round(mean(runs.allowed/PA), 2)) %>%
+  arrange(desc(runs.per.PA))
+f5.pitcher.season <- f5.pitcher.season %>%
+  filter(PA >= 30)
+
+#ggplot(f5.season, aes(pct.batters.reached, pct.runners.scored)) +
+  #geom_point(cex = f5.season$runs.per.PA*20) + 
+  #geom_text_repel(label = paste(f5.season$pitcher, f5.season$PA)) +
+  #geom_smooth(method = 'lm')
+```
+
+#### First Five Innings, Pitcher v. Batter Matchups (f5.AB)
+
+This is every AB that has occurred during the first five innings of
+games. This will tell you what the score was (for both teams and
+combined), the outcome of the AB, and whether there was a CS/GIDP in the
+AB. There seems to be something missing here, but I can't quite figure
+out how to improve it (or make it useful).
+
+```{r include = FALSE}
+f5.AB <- season.pbp %>%
+  filter(inning <= 5) %>%
+  group_by(home_team, away_team, batter, game_pk, game_date, at_bat_number, pitcher) %>%
+  summarize(home.score = max(home_score), 
+            away.score = max(away_score), 
+            total.runs = home.score + away.score, 
+            pitches = max(pitch_number), 
+            hits = sum(events %in% c('single', 'double', 'triple', 'home_run')), 
+            walks.hbp.error = sum(events %in% c('walk', 'hit_by_pitch', 'catcher_interf', 'field_error')), 
+            CS.pickoff = sum(events %in% c('caught_stealing_home', 'pickoff_1b', 'caught_stealing_2b', 'caught_stealing_3b')),
+            double.play = sum(events %in% c('double_play', 'strikeout_double_play', 'sac_fly_double_play', 'grounded_into_double_play'))) %>%
+  select(game_date, game_pk, pitcher, everything()) %>%
+  arrange(game_pk, at_bat_number)
+```
+
+#### Pitcher v. Batter Matchups: Outcomes (matchup.outcomes)
+
+How many times did a pitcher and batter match up and what happened each
+time? Gotcha. The key here is grouping twice, excluding the team names
+in the second call, and left joining the two data frames.
+
+```{r include = FALSE}
+outcomes <- season.pbp %>%
+  filter(events != '') %>%
+  group_by(batter, batter.team, pitcher, pitcher.team, description, events) %>%
+  summarize(rate = n()) %>%
+  ungroup()
+new.outcome <- outcomes %>%
+  group_by(batter, pitcher) %>%
+  summarize(PAs = sum(rate))
+matchup.outcomes <- outcomes %>%
+  left_join(new.outcome, join_by('batter' == 'batter', 'pitcher' == 'pitcher')) %>%
+  mutate(outcome.pct = round(rate/PAs, 2))
+
+```
+
+#### Pitcher Game Logs using built function
+
+This will pull a pitcher's game logs and bind them with the game logs of
+the opposing team's starting pitcher. I've chosen some key stats but
+have left out the pitch usage. This could be important when diagnosing
+matchups. (I suppose a beneficial adjustment could be to bind a
+pitcher's stats with the opposing team batting stats.) Note: must call
+function first (found in Functions section below).
+
+```{r include = FALSE}
+Corbin <- pitcher.game.logs("Corbin", "Patrick", 2023)
+Taillon <- pitcher.game.logs("Taillon", "Jameson", 2023)
+game1 <- rbind(Corbin, Taillon, fill = T) %>%
+  select(Team, PlayerName, Date, Opp, W, L, IP, TBF, Balls, Strikes, Pitches, H, R, ER, ERA, 
+         HR, BB, HBP, SO, `K%`, `K/9`, `BB/9`, `BB%`, `H/9`, `HR/9`, GB, FB, LD, AVG, WHIP, `LOB%`, 
+         RS, `RS/9`, EV, `HardHit%`, Barrels, `Barrel%`)
+#write_xlsx(game1, "WshChcThu.xlsx")
+```
+
+------------------------------------------------------------------------
+
+### [Batting Finds]{.underline}
+
+#### Batter Hits by Type (batter.hits.by.type)
+
+This tells us how each batter does against each pitch type. Strikes are
+true strikes, not balls put in play (in play is its own variable here).
+This is good to see how a batter does against a pitch that their
+opponent throws well and often. Pairs well with pitch.details.
+
+```{r include = FALSE}
+batter.hits.by.type <- season.pbp %>%
+  group_by(batter, pitch_name) %>%
+  summarize(singles = sum(events == 'single'), 
+            doubles = sum(events == 'double'), 
+            triples = sum(events == 'triple'), 
+            home_runs = sum(events == 'home_run'), 
+            in.play = sum(type == 'X'), 
+            hits = sum(events %in% c('single', 'double', 'triple', 'home_run')),  
+            strikes = sum(type == "S"), 
+            called.strike = sum(description == 'called_strike'), 
+            balls = sum(type == "B"), 
+            pitches = n(), 
+            b.pct = round((balls/pitches), 3),
+            strike.pct = round((strikes/pitches), 3),
+            in.play.pct = round(in.play/pitches, 3),  
+            avg.pitch.speed = round(mean(release_speed), 2), 
+            hit.pct = round(hits/pitches, 2)) %>%
+  mutate(total.pitches = sum(pitches), 
+         pct = round(pitches/total.pitches, 3)) %>%
+  select(batter, pitch_name, pitches, in.play, avg.pitch.speed, hit.pct, hits, singles, doubles, triples, home_runs, strikes, called.strike, balls, 
+         strike.pct, b.pct, in.play.pct, total.pitches, pct) %>%
+  arrange(desc(in.play))
+```
+
+#### Go Ahead RBIs (go.ahead.rbi)
+
+This measures each time that a player got a hit, sacrifice, or fielder's
+choice which lead to a go ahead run while their team was either down or
+tied. This can be filtered down to look at certain innings (maybe 7th or
+later). This will avoid the 1st inning 0-0 'go ahead RBI.'
+
+```{r}
+go.ahead.rbi <- season.pbp %>%
+  filter(post_bat_score > bat_score & post_bat_score > post_fld_score & fld_score >= bat_score) %>%
+  mutate(go.ahead.rbi = post_bat_score - bat_score) %>%
+  group_by(batter) %>%
+  summarize(hits = sum(events %in% c('single', 'double', 'triple', 'home_run')),
+            sac = sum(events %in% c('sac_bunt', 'sac_fly')), 
+            fc = sum(events %in% c('fielders_choice', 'fielders_choice_out')), 
+            rbi = sum(go.ahead.rbi))
+```
+
+------------------------------------------------------------------------
+
+### [**Betting Lines**]{.underline}
+
+#### Over/Under Records by Team (over.under)
+
+This scrapes from the TeamRankings website for betting. Something that I
+need to figure out is how to automate this into a spreadsheet that will
+update daily, instead of saving as .xlsx file and importing it into
+Excel. Be sure that your working directory is set before writing the
+file.
+
+```{r}
+over.under <- read_html("https://www.teamrankings.com/mlb/trends/ou_trends/") %>%
+  html_table(fill = T) %>%
+  as.data.frame() %>%
+  rename(., "Total" = "Total....") %>%
+  rename(., "Under" = "Under..") %>%
+  rename(., "Over" = "Over..") 
+write_xlsx(over.under, "OverUnderTotals.xlsx")
+```
+
+#### Team Game Logs and F5 (team.game.logs & f5.game.logs)
+
+I've gathered game by game scores and (in a separate data frame) the
+same info for the first 5 innings. You need to `left_join` these
+together. In all, it is two scrapes and a join, then aggregate more for
+deeper analysis. Team Game Logs would be so good with an O/U line for
+each game. How to bring that in...
+
+```{r include = FALSE}
+team.game.logs <- season.pbp %>%
+  group_by(game_pk, game_date, home_team, away_team) %>%
+  summarize(runs.h = max(post_home_score), 
+            runs.a = max(away_score), 
+            total.runs = runs.h + runs.a, 
+            score = paste(runs.h, "-", runs.a), 
+            innings = max(inning), 
+            hits = sum(events %in% c('single', 'double', 'triple', 'home_run'))) %>%
+  mutate(win= if_else(runs.h > runs.a, 1, -1),
+    winner = if_else(runs.h > runs.a,  "Home", "Away")) %>%
+  arrange(desc(game_date)) 
+
+f5 <- season.pbp %>%
+  filter(inning <= 5) %>%
+  group_by(game_pk, game_date, home_team, away_team) %>%
+  summarize(`f5.runs.h` = max(post_home_score), 
+            `f5.runs.a` = max(post_away_score), 
+            `f5.total.runs` = `f5.runs.h` + `f5.runs.a`)
+
+f5.game.logs <- team.game.logs %>%
+  left_join(f5, by = c('game_pk', 'game_date', 'home_team', 'away_team')) %>%
+  mutate(`%runs.h.f5` = round(`f5.runs.h`/runs.h, 2), 
+            `%runs.a.f5` = round(`f5.runs.a`/runs.a, 2),
+            `%total.runs.f5` = round(`f5.total.runs`/total.runs, 2)) %>%
+  select(game_date, game_pk, innings, home_team, away_team, runs.h, runs.a, total.runs, 
+         `f5.runs.h`, `f5.runs.a`, `f5.total.runs`, `%runs.h.f5`, `%runs.a.f5`, 
+         `%total.runs.f5`, hits, score)
+```
+
+#### Home/Away Splits Scoring Over Season (home.five, away.five)
+
+What does each team score (and give up) as home team AND away team, both
+in total and in the first five? The previoius build (team.game.logs)
+show info for each game, this is overall for the season. Should find a
+way to merge these but I kind of like them separate. May be able to call
+both of these in a matchup function...good idea. This is a subset of
+team.game.logs
+
+```{r include = FALSE}
+home.five <- f5.game.logs %>%
+       group_by(home_team) %>%
+       summarize(`%runs.h.f5` = round(mean(`%runs.h.f5`, na.rm = TRUE), 2), 
+                 total.runs.home = sum(runs.h), 
+                 f5.runs.h = sum(`f5.runs.h`), 
+                 f5.runs.a = sum(`f5.runs.a`), 
+                 `%runs.a.f5` = round(mean(`%runs.a.f5`, na.rm = TRUE), 2), 
+                 games = n(), 
+                 f5.run.diff = f5.runs.h - f5.runs.a, 
+                 RS.per.5 = round(f5.runs.h/games, 2), 
+                 RA.per.5 = round(f5.runs.a/games, 2), 
+                 runs.per = RS.per.5 + RA.per.5)
+
+away.five <- f5.game.logs %>%
+  group_by(away_team) %>%
+  summarize(`%runs.a.f5` = round(mean(`%runs.a.f5`, na.rm = TRUE), 2), 
+            total.runs.away = sum(runs.a), 
+            f5.runs.a = sum(`f5.runs.a`), 
+            f5.runs.h = sum(`f5.runs.h`), 
+            `%runs.h.f5` = round(mean(`%runs.h.f5`, na.rm = TRUE), 2), 
+            games = n(), 
+            f5.run.diff = f5.runs.a - f5.runs.h, 
+            RS.per.5 = round(f5.runs.a/games, 2), 
+            RA.per.5 = round(f5.runs.h/games, 2), 
+            runs.per = RS.per.5 + RA.per.5)
+
+```
+
+#### No Runs First Inning (NRFI)
+
+This took some work, conceptually. Aggregating was simple but it was a
+challenge to get the total runs and not runs for every game. Turns out
+you have to subtract the score from the post_score. Still confused about
+how it works, but it works!
+
+```{r include = FALSE}
+home.NRFI <- season.pbp %>%
+  filter(inning == 1) %>%
+  group_by(home_team) %>%
+  summarize(RS.home = sum(post_home_score - home_score),
+            RA.home = sum(post_away_score - away_score), 
+            home.games = length(unique(game_pk)), 
+            RS.per.home = round(RS.home/home.games, 2), 
+            RA.per.home = round(RA.home/home.games, 2))
+
+
+away.NFRI <- season.pbp %>%
+  filter(inning == 1) %>%
+  group_by(away_team) %>%
+  summarize(RS.away = sum(post_away_score - away_score),
+            RA.away = sum(post_home_score - home_score), 
+            away.games = length(unique(game_pk)), 
+            RS.per.away = round(RS.away/away.games, 2), 
+            RA.per.away = round(RA.away/away.games, 2))
+
+NRFI <- home.NRFI %>%
+  left_join(away.NFRI, join_by(home_team == away_team)) %>%
+  mutate(home.game.runs = RS.home + RA.home, 
+         away.game.runs = RS.away + RA.away) %>%
+  rename("team" = "home_team")
+```
+
+#### Combined daily matchups, strength rating, and predicted runs (today.games)
+
+This code is UGLY. There is definitely a better way to
+consolidate/streamline this code but for now...
+
+```{r}
+#get game pks, join with colors2 for abbreviations, rename appropriate teams and select key variables
+today.games <- get_game_pks_mlb(today(), level_ids = c(1)) %>%
+  select(game_pk, officialDate, dayNight, seriesGameNumber, teams.away.team.name, teams.home.team.name)
+today.games <- today.games %>%
+  left_join(colors2, join_by('teams.away.team.name' == 'name')) %>%
+  left_join(colors2, join_by('teams.home.team.name' == 'name'))
+today.games <- today.games %>%
+  rename('away_team' = 'team.abbr.x') %>%
+  rename('home_team' = 'team.abbr.y') %>%
+  select(game_pk, officialDate, away_team, home_team, officialDate) 
+#add strengths for away team and home team, aggregate to find prediction of game
+today.games <- today.games %>%
+  left_join(strength.away, by = c('away_team' = 'team'))
+today.games <- today.games %>%
+  left_join(strength.home, by = c('home_team' = 'team')) 
+today.games <- today.games %>%
+  mutate(prediction = away.strength + home.strength, 
+         absolute = abs(prediction), 
+         conf = rank(absolute))
+#use team.game.logs to aggregate RS and RA per game for both home and away team in their own dataframes
+away.stats <- team.game.logs %>%
+  select(-home_team) %>%
+  group_by(away_team) %>%
+  summarize(away.R.per.game = sum(runs.a)/n(), 
+            away.RA.per.game = sum(runs.h)/n()) 
+home.stats <- team.game.logs %>%
+  select(-away_team) %>%
+  group_by(home_team) %>%
+  summarize(home.R.per.game = sum(runs.h)/n(), 
+            home.RA.per.game = sum(runs.a)/n()) %>%
+  rename('team' = 'home_team')
+#join the RA and RS dataframse to the day's game slate, aggregate a final score prediction
+today.games <- today.games %>%
+  left_join(away.stats, by = 'away_team') %>%
+  left_join(home.stats, by = c('home_team' = 'team')) %>%
+  mutate(pred.total = (away.R.per.game + away.RA.per.game + home.R.per.game + home.RA.per.game)/2)
+today.games <- today.games %>%
+  select(away_team, home_team, prediction, pred.total, conf, everything())
+
+
+```
+
+#### First attempt at binding daily predictions with outcomes (dummy, results, year.pred.results)
+
+I believe that I have to initially add the game slate and predictions to
+`year.pred.results` and from now on, bind it as follows. To reset and
+create new mutate variables, year.pred.results \<- results.
+
+This is fucked. UNLESS you remove duplicated rows, which is a good way
+to end this call.
+
+```{r}
+dummy <- today.games
+results <- merge(dummy, team.game.logs, by = 'game_pk')
+year.pred.results <- 
+  rbind(year.pred.results, results, fill = TRUE) %>%
+  mutate(over.under = if_else(pred.total > total.runs, "Under", "Over"), 
+         unders = if_else(pred.total > total.runs, 1, 0), 
+         overs = if_else(pred.total < total.runs, 1, 0), 
+         winner.check = case_when(winner == 'Home' & prediction >= 0 ~ 1, 
+                                    winner == 'Away' & prediction < 0 ~ 1, 
+                                    winner == 'Home' & prediction < 0 ~ 0, 
+                                    winner == 'Away' & prediction >= 0 ~ 0), 
+         pred.diff = pred.total - total.runs) 
+year.pred.results <- year.pred.results[!duplicated(year.pred.results)]
+mean(year.pred.results$winner.check)
+```
+
+------------------------------------------------------------------------
+
+#### Average margin of win/loss for home/away splits
+
+It is exactly what it sounds like it is.
+
+```{r}
+margins.home.wins <- team.game.logs %>%
+  filter(winner == 'Home') %>%
+  group_by(home_team) %>%
+  summarize(home.w.marg = mean(runs.h - runs.a)) %>%
+  rename('team' = 'home_team')
+margins.home.loss <- team.game.logs %>%
+  filter(winner == 'Away') %>%
+  group_by(home_team) %>%
+  summarize(home.l.marg = mean(runs.h - runs.a)) %>%
+  rename('team' = 'home_team')
+margins.away.wins <- team.game.logs %>%
+  filter(winner == 'Away') %>%
+  group_by(away_team) %>%
+  summarize(away.w.marg = mean(runs.a - runs.h)) %>%
+  rename('team' = 'away_team')
+margins.away.loss <- team.game.logs %>%
+  filter(winner == 'Home') %>%
+  group_by(away_team) %>%
+  summarize(away.l.marg = mean(runs.a - runs.h)) %>%
+  rename('team' = 'away_team')
+margins <- margins.home.wins %>%
+  left_join(margins.home.loss, by = 'team') %>%
+  left_join(margins.away.wins, by = 'team') %>%
+  left_join(margins.away.loss, by = 'team') 
+#%>%
+  mutate(`home.w/l.diff` = home.w.marg + home.l.marg, 
+         `away.w/l.diff` = away.w.marg + away.l.marg)
+```
+
+### [Functions]{.underline}
+
+Useful (and elementary) functions that I created to get practice and
+make things slightly easier.
+
+#### Pitcher and Batter matchup functions
+
+Input the teams playing and get comparison stats. Also adds the league
+means for context. Don't need to update this every day.
+
+```{r}
+batting.matchup <- function(away.team, home.team) {
+  view(team.batting %>%
+         filter(Team == away.team | Team == home.team | Team == 'Mean'))
+}     
+
+pitching.matchup <- function(away.team, home.team) {
+  view(team.pitching %>%
+         filter(Team == away.team | Team == home.team | Team == 'Mean'))
+}
+```
+
+#### Individual player game logs
+
+I have provided the Fangraphs call for player game logs AND the function
+to make life easier. The Fangraphs call needs a player ID, but the
+function just asks for last name, first name, and year.
+
+```{r}
+batter.game.logs <- function(last, first, year) {
+  x <- playerid_lookup(last, first)
+  y <- fg_batter_game_logs(x$fangraphs_id, year)
+  view(y)
+}
+pitcher.game.logs <- function(last, first, year) {
+  x <- playerid_lookup(last, first) 
+  y <- fg_pitcher_game_logs(x$fangraphs_id, year)
+  view(y)
+}
+
+Tuve <- fg_batter_game_logs(5417, 2022) %>%
+  select(PlayerName, Date, Opp, BatOrder, PA, AB, H, "1B", "2B", "3B", HR, R, RBI, BB, SO, GDP, SB, CS, AVG, GB, FB, LD, 
+         Pitches, Balls, Strikes, "Swing%", Pull, Cent, Oppo, EV, "Barrel%", "HardHit%", everything())
+x <- fg_pitcher_game_logs(21690, 2023) 
+  select(PlayerName, Date, Opp, HomeAway, W, L, ERA, G, GS, IP, TBF, H, R, ER, HR, SO, BB, "H/9", "K/9", "BB/9", "HR/9", 
+         WHIP, Balls, Strikes, Pitches, BABIP, "GB%", "FB%", "Swing%", "Barrel%", everything())
+
+
+```
+
+#### Regression function
+
+Here is a great way to visualize a linear regression between variables.
+The function provides you with the R2, intercept, and slope. This is
+perfect for a look at whether or not variables have a relationship,
+especially before digging deeper.
+
+```{r}
+ggplotRegression <- function (fit) {
+  require(ggplot2)
+  ggplot(fit$model, aes_string(x = names(fit$model)[2], y = names(fit$model)[1])) + 
+    geom_point() +
+    stat_smooth(method = "lm", col = "red") +
+    labs(title = paste("Adj R2 = ",signif(summary(fit)$adj.r.squared, 5),
+                       "Intercept =",signif(fit$coef[[1]],5 ),
+                       " Slope =",signif(fit$coef[[2]], 5),
+                       " P =",signif(summary(fit)$coef[2,4], 5)))
+}
+#example
+ggplotRegression(lm(runs.allowed ~ walks.hbp.error, data = f5.season))
+```
+
+#### First Five Innings team matchup function (f5.matchup)
+
+This takes a teams home/away splits through the first five innings and
+spits out a projected total runs for a matchup. Be sure to put the away
+team before the home team. Need to find a way to include pitcher stats
+for weight here.
+
+```{r}
+f5.matchup <- function(away, home) {
+x <- away.five %>%
+  filter(away_team == away) %>%
+  select(away_team, RS.per.5, RA.per.5, runs.per) %>%
+  rename('team' = 'away_team')
+y <- home.five %>%
+  filter(home_team == home) %>%
+  select(home_team, RS.per.5, RA.per.5, runs.per) %>%
+  rename('team' = 'home_team')
+
+total <- rbind(x, y) 
+print(total %>%
+       mutate(f5.score = mean(runs.per)))
+}
+
+f5.matchup("TEX", "OAK")
+```
+
+#### Predicted Total Score function (total.score)
+
+Takes the same inputs as `f5.matchup` but for whole game instead of five
+innings. This is strictly for looking at over/under lines. Does not
+include weights for starting pitching which, obviously, it should (and
+many other weights too. Baby steps...)
+
+```{r}
+total.score <- function(away, home) {
+  x <- team.game.logs %>%
+    filter(away_team == away) %>%
+    group_by(away_team) %>%
+    summarize(R.per.game = sum(runs.a)/n(), 
+              RA.per.game = sum(runs.h)/n()) %>%
+    rename('team' = 'away_team')
+  y <- team.game.logs %>%
+    filter(home_team == home) %>%
+    group_by(home_team) %>%
+    summarize(R.per.game = sum(runs.h)/n(), 
+              RA.per.game = sum(runs.a)/n()) %>%
+    rename('team' = 'home_team')
+
+  
+  
+  new <- rbind(x, y) %>%
+    mutate(ind.score = (R.per.game + RA.per.game)/2) %>%
+    mutate(predicted.total = sum(ind.score))
+
+  print(new)
+}
+```
+
+#### Strength Matchup function (strength.matchup)
+
+This is a simple formula for predicting winners of games found in the
+book 'Curveball.' It is meant to be built on. I need to factor in
+pitcher performance in their last 3-5 starts as well. Also need to bind
+the day's slate of games through an already existing function (but
+where?) and then bind this with `team.game.logs` to keep track of the
+accuracy of prediction. Note: negative score in away games is good.
+Value of 1 is given to a home win, -1 for an away win. Keep that in mind
+when assessing the matchup rating.
+
+```{r}
+strength.home <- team.game.logs %>%
+  group_by(home_team) %>%
+  summarize(home.strength = mean(win)) %>%
+  rename("team" = "home_team") 
+strength.away <- team.game.logs %>%
+  group_by(away_team) %>%
+  summarize(away.strength = mean(win)) %>%
+  rename("team" = "away_team") 
+strength <- left_join(strength.home, strength.away, by = 'team') 
+
+
+strength.matchup <- function(away, home){
+  x <- strength %>%
+    filter(team == away | team == home) %>%
+    arrange(factor(team, levels = away))
+  new <- as.data.frame((x[1,3] + x[2,2]))  
+  x <- bind_rows(x, new) 
+
+  #print(x)
+}
+
+strength.matchup("ATL", "TOR")
+```
+
+#### Combined Total Score and Strength function (matchup)
+
+This takes the two previous functions (`total.score` &
+`strength.matchup`) and returns a combined tibble. Note: in order to
+only return the combined tibble we needed to disable `print` in the
+previous two functions. This ensures that it only returns the combined
+tibble instead of the other two AND the combined.
+
+```{r}
+matchup <- function(away, home){
+  x <- strength.matchup(away, home)
+  y <- total.score(away, home)
+  
+  r <- left_join(x, y, by = 'team')
+  print(r)
+}
+
+matchup("MIN", "LAD")
+```
+
+#### Rolling average function
+
+...
+
+### [**Models and Visualization**]{.underline}
+
+#### Predict runs allowed by pitcher
+
+...
